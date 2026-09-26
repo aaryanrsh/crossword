@@ -60,21 +60,35 @@
     background: var(--bg); color: var(--ink); padding: 10px 12px;
     font: 14px/1.45 var(--mono); letter-spacing: 0.08em;
   }
-  #grid-input { min-height: 230px; text-transform: uppercase; }
+  #grid-input { min-height: 230px; text-transform: uppercase; white-space: pre; overflow-x: auto; }
   #words-input { min-height: 120px; letter-spacing: 0.02em; }
-  textarea:focus-visible, button:focus-visible, .file:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .hint { color: var(--muted); font-size: 13px; margin: 0; }
 
-  .actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  button, .file {
+  .drop {
+    position: relative; display: grid; gap: 4px; justify-items: center; text-align: center;
+    padding: 22px 16px; border: 1.5px dashed var(--faint); border-radius: 8px; cursor: pointer;
+    background: var(--bg); transition: border-color 0.15s, background 0.15s;
+    text-transform: none; letter-spacing: 0; color: var(--ink);
+  }
+  .drop strong { font: 600 16px/1.3 var(--display); }
+  .drop span { color: var(--muted); font-size: 13px; }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop.over { background: var(--surface); }
+  .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+  .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .status { margin: 0; font-size: 14px; color: var(--muted); }
+  .status b { color: var(--ink); font-weight: 600; }
+  .divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+  .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  button {
     font: 600 14px/1 var(--body); border-radius: 6px; padding: 11px 14px; cursor: pointer;
     border: 1px solid var(--line); background: transparent; color: var(--ink);
   }
-  button:hover, .file:hover { border-color: var(--faint); }
+  button:hover { border-color: var(--faint); }
   #solve { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); grid-column: 1 / -1; font-size: 15px; padding: 13px; }
   #solve:hover { filter: brightness(1.08); }
-  .file { position: relative; display: inline-flex; align-items: center; justify-content: center; text-transform: none; letter-spacing: 0; color: var(--ink); }
-  .file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
   .error { color: var(--miss); background: var(--miss-bg); border-radius: 6px; padding: 10px 12px; margin: 0; font-size: 14px; }
 
@@ -90,6 +104,7 @@
   .loop { transition: opacity 0.15s; }
   .loop rect { fill-opacity: var(--hl-fill); stroke-width: 1.6; }
   svg.focusing .loop:not(.on) { opacity: 0.15; }
+  .loop.multi:not(.on) { display: none; }
 
   .words { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 0; padding: 0; }
   .chip {
@@ -103,20 +118,27 @@
   .chip small { font: 400 12px/1 var(--mono); color: var(--muted); }
   .chip.missing small { color: inherit; }
 
-  @media (prefers-reduced-motion: reduce) { .loop { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .loop, .drop { transition: none; } }
 </style>
 
 <div class="wrap">
   <header>
     <h1>Word Search Solver</h1>
-    <p class="tagline">Paste a puzzle, get every word circled. Searches all 8 directions.</p>
+    <p class="tagline">Drop in a puzzle PDF or paste the letters, and every word gets circled.</p>
   </header>
 
   <div class="layout">
     <form class="panel" id="form">
+      <label class="drop" id="drop" for="upload">
+        <strong>Drop a puzzle PDF here</strong>
+        <span>or click to choose one</span>
+        <input type="file" id="upload" accept=".pdf,application/pdf,.txt,text/plain">
+      </label>
+      <p class="status" id="status" hidden></p>
+      <div class="divider">or type it in</div>
       <div class="field">
         <label for="grid-input">Letter grid</label>
-        <textarea id="grid-input" spellcheck="false" autocomplete="off" autocapitalize="characters"></textarea>
+        <textarea id="grid-input" wrap="off" spellcheck="false" autocomplete="off" autocapitalize="characters"></textarea>
         <p class="hint">One row per line. Spaces between letters are fine.</p>
       </div>
       <div class="field">
@@ -127,7 +149,6 @@
       <p class="error" id="error" hidden></p>
       <div class="actions">
         <button type="submit" id="solve">Solve</button>
-        <label class="file" for="upload">Upload<input type="file" id="upload" accept=".txt,text/plain"></label>
         <button type="button" id="example">Example</button>
         <button type="button" id="clear">Clear</button>
       </div>
@@ -144,6 +165,9 @@
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- Loading the worker as a plain script lets pdf.js run in the page itself. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
 <script>
 const EXAMPLE_GRID = `V E N U S G J A O T U L P
 B F J U P I T E R L N N J
@@ -165,6 +189,7 @@ const END = "$";
 const HL = 8;
 const SVGNS = "http://www.w3.org/2000/svg";
 const $ = id => document.getElementById(id);
+let puzzleTitle = "";
 
 const normalize = w => w.toUpperCase().replace(/[^A-Z]/g, "");
 
@@ -208,8 +233,9 @@ function solve(grid, words) {
   return found;
 }
 
+// Unreadable squares stay in the grid as "?" so the letters after them keep their place.
 function parseGrid(text) {
-  return text.split(/\r?\n/).map(normalize).filter(Boolean);
+  return text.split(/\r?\n/).map(line => line.toUpperCase().replace(/[\s,]/g, "")).filter(Boolean);
 }
 
 function parseWords(text) {
@@ -241,8 +267,11 @@ function run() {
   if (!grid.length) return showError("Add the letter grid first: one row of letters per line.");
   if (!words.length) return showError("Add at least one word to find.");
   const widths = new Set(grid.map(r => r.length));
+  const unknown = grid.join("").replace(/[A-Z]/g, "").length;
   showError(widths.size > 1
     ? `Rows have different lengths (${[...widths].sort((a, b) => a - b).join(", ")} letters). Solved anyway, but check for a typo.`
+    : unknown
+    ? `${unknown} square${unknown > 1 ? "s" : ""} couldn't be read and show as "?". Type the right letter in to fix it.`
     : "");
 
   const t0 = performance.now();
@@ -250,7 +279,7 @@ function run() {
   const ms = performance.now() - t0;
 
   render(grid, words, found, ms);
-  try { localStorage.setItem("ws-draft", JSON.stringify({ grid: $("grid-input").value, words: $("words-input").value })); } catch (e) {}
+  try { localStorage.setItem("ws-draft", JSON.stringify({ grid: $("grid-input").value, words: $("words-input").value, title: puzzleTitle })); } catch (e) {}
 }
 
 function render(grid, words, found, ms) {
@@ -273,7 +302,8 @@ function render(grid, words, found, ms) {
     const color = `var(--hl-${i++ % HL})`;
     colorOf.set(word, color);
     for (const hit of hits) {
-      cellsOf(hit).forEach(k => used.add(k));
+      // Short words often turn up many times by chance; their loops only show on hover.
+      if (hits.length === 1) cellsOf(hit).forEach(k => used.add(k));
       const [r1, c1] = hit.start, [r2, c2] = hit.end;
       const x1 = pad + c1 * S + S / 2, y1 = pad + r1 * S + S / 2;
       const x2 = pad + c2 * S + S / 2, y2 = pad + r2 * S + S / 2;
@@ -281,7 +311,7 @@ function render(grid, words, found, ms) {
       const h = S * 0.76;
       const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
       const g = document.createElementNS(SVGNS, "g");
-      g.setAttribute("class", "loop");
+      g.setAttribute("class", hits.length > 1 ? "loop multi" : "loop");
       g.dataset.word = word;
       g.setAttribute("transform", `translate(${(x1 + x2) / 2} ${(y1 + y2) / 2}) rotate(${angle})`);
       const rect = document.createElementNS(SVGNS, "rect");
@@ -319,7 +349,9 @@ function render(grid, words, found, ms) {
       btn.type = "button";
       btn.className = "chip found";
       const [r, c] = hits[0].start;
-      btn.title = `Starts at row ${r + 1}, column ${c + 1}`;
+      btn.title = hits.length > 1
+        ? `Found ${hits.length} times. Hover to see them all.`
+        : `Starts at row ${r + 1}, column ${c + 1}`;
       btn.innerHTML = `<span class="dot"></span><span class="name"></span><small></small>`;
       btn.querySelector(".dot").style.background = colorOf.get(word);
       btn.querySelector(".name").textContent = word;
@@ -347,6 +379,11 @@ function render(grid, words, found, ms) {
   const time = document.createElement("span");
   time.textContent = ms < 1 ? `${ms.toFixed(2)} ms` : `${ms.toFixed(1)} ms`;
   $("stats").append(strong, size, time);
+  if (puzzleTitle) {
+    const name = document.createElement("span");
+    name.textContent = puzzleTitle;
+    $("stats").append(name);
+  }
 }
 
 function focusWord(word, btn) {
@@ -355,6 +392,155 @@ function focusWord(word, btn) {
   svg.querySelectorAll(".loop").forEach(g => g.classList.toggle("on", g.dataset.word === word));
   document.querySelectorAll(".chip.on").forEach(c => c.classList.remove("on"));
   if (btn) btn.classList.add("on");
+}
+
+// ---- Reading puzzle PDFs ----
+// Printable word searches (WordMint and similar) keep every grid letter as real text
+// with an exact position, so the grid can be rebuilt without reading pixels.
+
+const JUNK = /wordmint|create your own|name\s*:|date\s*:|www\.|https?:|©|copyright|answer key/i;
+const median = a => { const b = [...a].sort((p, q) => p - q); return b[b.length >> 1]; };
+
+async function readPdf(file) {
+  if (!window.pdfjsLib) throw new Error("The PDF reader didn't load. Check your connection and reload the page.");
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const { height } = page.getViewport({ scale: 1 });
+    const { items } = await page.getTextContent();
+    const puzzle = findPuzzle(items
+      .filter(it => it.str && it.str.trim())
+      .map((it, i) => ({
+        i, str: it.str, x: it.transform[4], y: height - it.transform[5], w: it.width,
+        h: it.height || Math.hypot(it.transform[2], it.transform[3]) || 10,
+      })));
+    if (puzzle) return puzzle;
+  }
+  return null;
+}
+
+function findPuzzle(items) {
+  // 1. Grid letters: text pieces that are one letter, or letters with single spaces ("M M").
+  const letters = [];
+  for (const it of items) {
+    const s = it.str.trim();
+    if (!/^[A-Za-z](?: [A-Za-z])*$/.test(s)) continue;
+    const lead = it.str.indexOf(s[0]);
+    const charW = it.w / it.str.length;
+    for (let k = 0; k < s.length; k += 2) {
+      letters.push({ ch: s[k].toUpperCase(), x: it.x + (lead + k + 0.5) * charW, y: it.y, h: it.h, item: it.i });
+    }
+  }
+  if (letters.length < 25) return null;
+  const h = median(letters.map(l => l.h));
+
+  // 2. Rows: letters sharing a baseline. Keep the rows that look like part of the grid.
+  letters.sort((a, b) => a.y - b.y || a.x - b.x);
+  let rows = [];
+  for (const l of letters) {
+    const last = rows[rows.length - 1];
+    if (last && l.y - last.y < h * 0.5) last.letters.push(l);
+    else rows.push({ y: l.y, letters: [l] });
+  }
+  const widest = Math.max(...rows.map(r => r.letters.length));
+  rows = rows.filter(r => r.letters.length >= Math.max(4, widest * 0.5));
+  if (rows.length < 4) return null;
+
+  // 3. Columns: cluster the letters' x positions across all rows.
+  const gaps = [];
+  for (const r of rows) {
+    const xs = r.letters.map(l => l.x).sort((a, b) => a - b);
+    for (let k = 1; k < xs.length; k++) gaps.push(xs[k] - xs[k - 1]);
+  }
+  const step = median(gaps.filter(g => g > h * 0.3)) || h;
+  const xs = rows.flatMap(r => r.letters.map(l => l.x)).sort((a, b) => a - b);
+  const clusters = [];
+  for (const x of xs) {
+    const last = clusters[clusters.length - 1];
+    if (last && x - last[last.length - 1] < step * 0.5) last.push(x);
+    else clusters.push([x]);
+  }
+  const cols = clusters.map(c => c.reduce((a, b) => a + b, 0) / c.length);
+  if (cols.length < 4) return null;
+
+  const cells = rows.map(() => Array(cols.length).fill("?"));
+  const gridItems = new Set();
+  rows.forEach((r, ri) => r.letters.forEach(l => {
+    let best = 0;
+    cols.forEach((cx, ci) => { if (Math.abs(cx - l.x) < Math.abs(cols[best] - l.x)) best = ci; });
+    if (cells[ri][best] === "?") cells[ri][best] = l.ch;
+    gridItems.add(l.item);
+  }));
+
+  // 4. Everything below the top of the grid that isn't a grid letter is the word list.
+  //    The biggest text above the grid is the title.
+  const top = rows[0].y - h;
+  const inGrid = it => it.y > top && it.y < rows[rows.length - 1].y + h * 0.5
+    && it.x > cols[0] - step && it.x < cols[cols.length - 1] + step;
+  const rest = items.filter(it => !gridItems.has(it.i) && !JUNK.test(it.str));
+  const titleItem = rest.filter(it => it.y < top).sort((a, b) => b.h - a.h)[0];
+
+  // Join pieces of one entry that were split on the same line ("Stray" + "Kids").
+  const below = rest.filter(it => it.y >= top && !inGrid(it)).sort((a, b) => a.y - b.y || a.x - b.x);
+  const entries = [];
+  for (const it of below) {
+    const last = entries[entries.length - 1];
+    const gap = last ? it.x - (last.x + last.w) : Infinity;
+    if (last && Math.abs(it.y - last.y) < it.h * 0.5 && gap < it.h * 0.6) {
+      last.str += (gap > it.h * 0.15 ? " " : "") + it.str;
+      last.w = it.x + it.w - last.x;
+    } else {
+      entries.push({ ...it });
+    }
+  }
+  const words = entries.sort((a, b) => a.i - b.i)
+    .map(e => e.str.trim().replace(/\s+/g, " "))
+    .filter(w => normalize(w).length >= 2);
+
+  return {
+    grid: cells.map(r => r.join(" ")).join("\n"),
+    words,
+    title: titleItem ? titleItem.str.trim() : "",
+    rows: cells.length,
+    cols: cols.length,
+  };
+}
+
+function setStatus(...parts) {
+  // Bold parts are passed as [text]; plain strings stay plain.
+  $("status").replaceChildren(...parts.map(p => {
+    if (!Array.isArray(p)) return document.createTextNode(p);
+    const b = document.createElement("b");
+    b.textContent = p[0];
+    return b;
+  }));
+  $("status").hidden = !parts.length;
+}
+
+async function loadFile(file) {
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  showError("");
+  setStatus("Reading ", [file.name], "…");
+  try {
+    if (!isPdf) {
+      puzzleTitle = file.name.replace(/\.[^.]+$/, "");
+      loadText(await file.text());
+      return setStatus("Loaded ", [file.name], ".");
+    }
+    const puzzle = await readPdf(file);
+    if (!puzzle) {
+      setStatus();
+      return showError(`Couldn't find a letter grid in ${file.name}. If it's a scanned page or a photo, there's no text to read: type the letters in below instead.`);
+    }
+    puzzleTitle = puzzle.title;
+    $("grid-input").value = puzzle.grid;
+    $("words-input").value = puzzle.words.join("\n");
+    run();
+    setStatus("Read ", [file.name], `: ${puzzle.rows} × ${puzzle.cols} grid, ${puzzle.words.length} words. Fix anything below and press Solve.`);
+  } catch (err) {
+    setStatus();
+    showError(`Couldn't open ${file.name}. ${err && err.message ? err.message : "Try another file."}`);
+  }
 }
 
 function loadText(text) {
@@ -367,6 +553,8 @@ function loadText(text) {
 
 $("form").addEventListener("submit", e => { e.preventDefault(); run(); });
 $("example").addEventListener("click", () => {
+  puzzleTitle = "Planets and space";
+  setStatus();
   $("grid-input").value = EXAMPLE_GRID;
   $("words-input").value = EXAMPLE_WORDS;
   run();
@@ -374,22 +562,43 @@ $("example").addEventListener("click", () => {
 $("clear").addEventListener("click", () => {
   $("grid-input").value = "";
   $("words-input").value = "";
+  puzzleTitle = "";
+  setStatus();
   showError("");
   $("grid-input").focus();
 });
 $("upload").addEventListener("change", e => {
   const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => loadText(reader.result);
-  reader.onerror = () => showError("Couldn't read that file. Upload a plain .txt file.");
-  reader.readAsText(file);
+  if (file) loadFile(file);
   e.target.value = "";
+});
+
+// Drop a file anywhere on the page.
+let dragDepth = 0;
+const hasFiles = e => [...(e.dataTransfer?.types || [])].includes("Files");
+document.addEventListener("dragenter", e => {
+  if (!hasFiles(e)) return;
+  dragDepth++;
+  $("drop").classList.add("over");
+});
+document.addEventListener("dragleave", e => {
+  if (!hasFiles(e)) return;
+  if (--dragDepth <= 0) { dragDepth = 0; $("drop").classList.remove("over"); }
+});
+document.addEventListener("dragover", e => { if (hasFiles(e)) e.preventDefault(); });
+document.addEventListener("drop", e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  $("drop").classList.remove("over");
+  const file = e.dataTransfer.files[0];
+  if (file) loadFile(file);
 });
 
 let draft = null;
 try { draft = JSON.parse(localStorage.getItem("ws-draft")); } catch (e) {}
 $("grid-input").value = draft?.grid || EXAMPLE_GRID;
 $("words-input").value = draft?.words || EXAMPLE_WORDS;
+puzzleTitle = draft ? draft.title || "" : "Planets and space";
 run();
 </script>

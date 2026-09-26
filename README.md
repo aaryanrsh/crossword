@@ -4,7 +4,9 @@ Finds every word from a list in a letter grid, in all 8 directions. Pure Python,
 
 ## Web page
 
-Open `web/index.html` in a browser. Paste the grid and the words (or upload a puzzle `.txt` in the format below), press Solve, and every word gets circled. Hover a word to pick out its loop. The solver runs in the browser, so nothing is sent anywhere.
+Open `web/index.html` in a browser and drop a puzzle PDF onto it. The page reads the grid and word list straight from the PDF's text (this works for printables like WordMint's) and circles every word. You can also paste the grid and words, or upload a `.txt` in the format below. Hover a word to pick out its loop; words that turn up more than once only show their loops on hover.
+
+Scanned pages and photos have no text to read, so those still need the letters typed in. Everything runs in the browser, so files aren't sent anywhere.
 
 ## Command line
 
