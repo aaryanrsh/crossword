@@ -2,6 +2,12 @@
 
 Finds every word from a list in a letter grid, in all 8 directions. Pure Python, no dependencies.
 
+## Web page
+
+Open `web/index.html` in a browser. Paste the grid and the words (or upload a puzzle `.txt` in the format below), press Solve, and every word gets circled. Hover a word to pick out its loop. The solver runs in the browser, so nothing is sent anywhere.
+
+## Command line
+
 ```
 python wordsearch.py examples/animals.txt
 ```
